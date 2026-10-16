@@ -16,9 +16,21 @@ const fileVersion = (() => {
   }
 })();
 const version = env("APP_VERSION", "") || fileVersion || null;
+// Commit (hash completo) e repositório: informados no manifesto para o hub mostrar o link do commit.
+const fileCommit = (() => {
+  try {
+    return fs.readFileSync("/app/COMMIT", "utf8").trim();
+  } catch {
+    return "";
+  }
+})();
+const commit = env("APP_COMMIT", "") || fileCommit || null;
+const repository = env("APP_REPOSITORY", "") || null;
 
 const manifest = {
   version,
+  commit,
+  repository,
   permissions: [{ code: "teste.ver", name: "Ver a página de teste" }],
   roles: [{ code: "leitor", name: "Leitor", permissions: ["teste.ver"] }]
 };
@@ -69,7 +81,7 @@ const server = https.createServer(
         200,
         `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>MVP de teste</title>
 <body style="font-family:system-ui;margin:3rem;color:#0b1a17">
-<h1>MVP de teste (GitHub) — 1.0.1 (hotfix)</h1>
+<h1>MVP de teste (GitHub) — 1.0.2 (hotfix)</h1>
 <p>Versão em execução: <b>${escape(version ?? "não informada")}</b></p>
 <p>Você entrou como <b>${escape(ctx.name ?? ctx.email)}</b> (${escape(ctx.role?.name ?? "")}).</p>
 <p style="color:#5d6f69">Rodapé da feature.</p>
