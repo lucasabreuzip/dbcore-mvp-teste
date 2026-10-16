@@ -7,7 +7,15 @@ const https = require("https");
 
 const env = (name, fallback) => process.env[name] || fallback;
 const slug = env("Mvp__ProjectSlug", "");
-const version = env("APP_VERSION", "") || null;
+// Versão: APP_VERSION (build-arg) ou o commit gravado em /app/VERSION no build.
+const fileVersion = (() => {
+  try {
+    return fs.readFileSync("/app/VERSION", "utf8").trim();
+  } catch {
+    return "";
+  }
+})();
+const version = env("APP_VERSION", "") || fileVersion || null;
 
 const manifest = {
   version,

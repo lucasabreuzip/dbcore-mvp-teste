@@ -1,0 +1,137 @@
+# Modelo de PROJETO para o Dokploy com provider GitHub: o Dokploy clona o repositório do MVP e
+# CONSTRÓI a imagem do MVP no servidor (sem registry para o MVP). Gateway e pki-init continuam vindo
+# do registry do DB Core Hub.
+#
+# Como usar: copie este arquivo para a RAIZ do repositório do MVP (ex.: docker-compose.dbcore.yml) e,
+# no Dokploy, aponte o "Compose Path" para ele. O build usa o Dockerfile da raiz (ou MVP_DOCKERFILE).
+# Guia completo: docs/06-Guia-publicar-novo-projeto/guia-publicar-novo-projeto.md
+#
+# Diferenças para docker-compose.yml (modelo com imagem pronta): só o serviço "mvp" (build + pull_policy)
+# e o texto da publicação enviado ao hub (MVP_VERSION). O restante é idêntico — mantenha os dois iguais.
+
+services:
+  pki-init:
+    image: ${REGISTRY}/dbcore/pki-init:${DBCORE_VERSION}
+    command: ["project", "${PROJECT_SLUG}"]
+    environment:
+      # Usuário (uid) com que o MVP roda: dono de mvp.key. .NET = 1654; ex.: Node "node" = 1000.
+      MVP_CERT_UID: ${MVP_CERT_UID:-1654}
+    volumes:
+      - stack-pki:/pki
+    network_mode: none
+    restart: "no"
+
+  gateway:
+    image: ${REGISTRY}/dbcore/access-gateway:${DBCORE_VERSION}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Gateway__ProjectSlug: ${PROJECT_SLUG}
+      Gateway__ProjectName: ${PROJECT_NAME}
+      Gateway__PublicHost: ${PROJECT_HOST}
+      Gateway__ProjectDescription: ${PROJECT_DESCRIPTION:-}
+      Gateway__ProjectIcon: ${PROJECT_ICON:-layers}
+      # Texto registrado como "publicação" no hub (troque MVP_VERSION a cada versão para ter histórico).
+      Gateway__MvpImage: github/${PROJECT_SLUG}:${MVP_VERSION:-latest}
+      Gateway__Environment: ${DBCORE_ENVIRONMENT:-prod}
+      Gateway__RegistrationSecret: ${DBCORE_REGISTRATION_SECRET:-}
+      Gateway__ServiceToken: ${GATEWAY_SERVICE_TOKEN:-}
+      Gateway__HubInternalUrl: https://hub-api:8443
+      Gateway__HubCertSha256: ${DBCORE_HUB_CERT_SHA256:-}
+      Gateway__HubPublicUrl: https://${HUB_HOST}
+      Gateway__UpstreamUrl: https://mvp-${PROJECT_SLUG}:8443
+      Gateway__ClientCertificatePath: /pki/certs/gateway.crt
+      Gateway__ClientCertificateKeyPath: /pki/certs/gateway.key
+      Gateway__UpstreamCaPath: /pki/certs/ca.crt
+      Gateway__CookieName: __Host-dbgw
+      Gateway__RequireHttpsCookies: "true"
+      Gateway__LoginAttemptsPerMinute: ${GATEWAY_LOGIN_ATTEMPTS_PER_MINUTE:-300}
+    volumes:
+      - stack-pki:/pki:ro
+      - gateway-data:/data
+    depends_on:
+      pki-init: { condition: service_completed_successfully }
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=dokploy-network"
+      - "traefik.http.routers.dbcore-${PROJECT_SLUG}.rule=Host(`${PROJECT_HOST}`)"
+      - "traefik.http.routers.dbcore-${PROJECT_SLUG}.entrypoints=websecure"
+      - "traefik.http.routers.dbcore-${PROJECT_SLUG}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.dbcore-${PROJECT_SLUG}.loadbalancer.server.port=8080"
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+    networks:
+      dokploy-network: {}
+      hub-internal:
+        aliases: ["gateway-${PROJECT_SLUG}"]
+      project: {}
+    restart: unless-stopped
+
+  mvp:
+    # Construída pelo Dokploy a partir do repositório clonado (contexto = pasta deste arquivo).
+    build:
+      context: ${MVP_BUILD_CONTEXT:-.}
+      dockerfile: ${MVP_DOCKERFILE:-Dockerfile}
+      # Versão gravada na imagem (o MVP pode informá-la no manifesto, campo "version"). Para usar o commit automático,
+      # veja "Versão no manifesto" em docs/07-Padrao-MVP.
+      args:
+        APP_VERSION: ${MVP_VERSION:-}
+    image: dbcore-build/mvp-${PROJECT_SLUG}:${MVP_VERSION:-latest}
+    pull_policy: build
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: Host=mvp-db;Database=app;Username=app
+      Mvp__DbPasswordFile: /pki/secrets/db_password
+      Mvp__ProjectSlug: ${PROJECT_SLUG}
+      Mvp__ServerCertificatePath: /pki/certs/mvp.crt
+      Mvp__ServerCertificateKeyPath: /pki/certs/mvp.key
+      Mvp__CaPath: /pki/certs/ca.crt
+    volumes:
+      - stack-pki:/pki:ro
+    depends_on:
+      pki-init: { condition: service_completed_successfully }
+      mvp-db: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { cpus: "${MVP_CPUS:-1.0}", memory: "${MVP_MEMORY:-512M}" }
+    networks:
+      project:
+        aliases: ["mvp-${PROJECT_SLUG}"]
+      project-data: {}
+    restart: unless-stopped
+
+  mvp-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD_FILE: /pki/secrets/db_password
+    volumes:
+      - stack-pki:/pki:ro
+      - mvp-db-data:/var/lib/postgresql/data
+    depends_on:
+      pki-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 10s
+      retries: 10
+    networks: [project-data]
+    restart: unless-stopped
+
+networks:
+  dokploy-network:
+    external: true
+  hub-internal:
+    name: dbcore-hub-internal
+    external: true
+  project:
+    name: dbcore-${PROJECT_SLUG}
+    internal: true
+  project-data:
+    name: dbcore-${PROJECT_SLUG}-data
+    internal: true
+
+volumes:
+  stack-pki:
+  gateway-data:
+  mvp-db-data:
