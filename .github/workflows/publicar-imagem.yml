@@ -1,0 +1,48 @@
+# Publica a imagem do MVP no GitHub Container Registry (ghcr.io) a cada push na main e a cada tag vX.Y.Z.
+#   main   -> ghcr.io/<conta>/<repo>:<commit curto>   (versão = commit)
+#   v1.2.0 -> ghcr.io/<conta>/<repo>:1.2.0            (versão = 1.2.0)
+# No Dokploy (stack do MVP): MVP_IMAGE=ghcr.io/<conta>/<repo>:<tag>. O hub mostra cada versão no histórico e consegue
+# voltar para uma anterior trocando só o MVP_IMAGE.
+name: Publicar imagem
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  imagem:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versão e nome da imagem
+        id: v
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then version="${GITHUB_REF#refs/tags/v}"; else version="${GITHUB_SHA::7}"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "image=$repo:$version" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.v.outputs.image }}
+          build-args: APP_VERSION=${{ steps.v.outputs.version }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Resumo
+        run: |
+          echo "Imagem publicada: \`${{ steps.v.outputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "No Dokploy: \`MVP_IMAGE=${{ steps.v.outputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
