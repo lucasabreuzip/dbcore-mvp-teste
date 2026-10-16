@@ -1,14 +1,22 @@
-# Publica a imagem do MVP no GitHub Container Registry (ghcr.io) a cada push na main e a cada tag vX.Y.Z.
-#   main   -> ghcr.io/<conta>/<repo>:<commit curto>   (versão = commit)
-#   v1.2.0 -> ghcr.io/<conta>/<repo>:1.2.0            (versão = 1.2.0)
-# No Dokploy (stack do MVP): MVP_IMAGE=ghcr.io/<conta>/<repo>:<tag>. O hub mostra cada versão no histórico e consegue
-# voltar para uma anterior trocando só o MVP_IMAGE.
+# Publica a imagem do MVP no GitHub Container Registry (ghcr.io) seguindo o GitFlow.
+# Copie para .github/workflows/ do repositório do MVP. Mesma regra do pipeline do hub (build/versao-gitflow.sh):
+#
+#   feature/*                     só build de teste (PR), não publica
+#   develop                       ghcr.io/<conta>/<repo>:develop-<commit>  + :develop (móvel)   → homologação
+#   release/X.Y.Z, hotfix/X.Y.Z   ghcr.io/<conta>/<repo>:X.Y.Z-rc.<n>                          → homologação
+#   tag vX.Y ou vX.Y.Z (main)     ghcr.io/<conta>/<repo>:X.Y(.Z)                               → produção
+#
+# No Dokploy: produção com MVP_IMAGE=ghcr.io/<conta>/<repo>:X.Y.Z (sempre fixa); homologação pode usar :develop.
+# A versão vai gravada na imagem (APP_VERSION) para o manifesto: o hub mostra cada versão e consegue voltar para uma
+# anterior trocando só o MVP_IMAGE.
 name: Publicar imagem
 
 on:
   push:
-    branches: [main]
+    branches: [develop, "release/**", "hotfix/**"]
     tags: ["v*"]
+  pull_request:
+    branches: [develop, main, "release/**", "hotfix/**"]
 
 permissions:
   contents: read
@@ -20,15 +28,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Versão e nome da imagem
+      - name: Versão (GitFlow)
         id: v
         run: |
           repo="ghcr.io/${GITHUB_REPOSITORY,,}"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then version="${GITHUB_REF#refs/tags/v}"; else version="${GITHUB_SHA::7}"; fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "image=$repo:$version" >> "$GITHUB_OUTPUT"
+          sha="${GITHUB_SHA::7}"; ref="$GITHUB_REF"; nome="${GITHUB_REF#refs/heads/}"
+          semver='^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+          publicar=nao; versao="pr-$sha"; movel=""
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            if [[ "$ref" == refs/tags/v* && "${ref#refs/tags/v}" =~ $semver ]]; then
+              publicar=sim; versao="${ref#refs/tags/v}"
+            elif [[ "$nome" == release/* || "$nome" == hotfix/* ]]; then
+              if [[ "${nome#*/}" =~ $semver ]]; then publicar=sim; versao="${nome#*/}-rc.$GITHUB_RUN_NUMBER"
+              else echo "::warning::use release/X.Y.Z ou hotfix/X.Y.Z (recebido: $nome) — imagem não publicada"; fi
+            elif [[ "$nome" == develop ]]; then
+              publicar=sim; versao="develop-$sha"; movel="develop"
+            fi
+          fi
+          tags="$repo:$versao"; [[ -n "$movel" ]] && tags="$tags,$repo:$movel"
+          echo "publicar=$publicar" >> "$GITHUB_OUTPUT"
+          echo "version=$versao" >> "$GITHUB_OUTPUT"
+          echo "image=$repo:$versao" >> "$GITHUB_OUTPUT"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
 
       - uses: docker/login-action@v3
+        if: steps.v.outputs.publicar == 'sim'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -37,12 +61,16 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          tags: ${{ steps.v.outputs.image }}
+          push: ${{ steps.v.outputs.publicar == 'sim' }}
+          tags: ${{ steps.v.outputs.tags }}
           build-args: APP_VERSION=${{ steps.v.outputs.version }}
           labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
       - name: Resumo
         run: |
-          echo "Imagem publicada: \`${{ steps.v.outputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "No Dokploy: \`MVP_IMAGE=${{ steps.v.outputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ steps.v.outputs.publicar }}" == "sim" ]]; then
+            echo "Imagem publicada: \`${{ steps.v.outputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "No Dokploy: \`MVP_IMAGE=${{ steps.v.outputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Build de verificação (não publica nesta branch)." >> "$GITHUB_STEP_SUMMARY"
+          fi
