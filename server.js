@@ -69,7 +69,7 @@ const server = https.createServer(
         200,
         `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>MVP de teste</title>
 <body style="font-family:system-ui;margin:3rem;color:#0b1a17">
-<h1>MVP de teste (GitHub) — nova versão</h1>
+<h1>MVP de teste (GitHub) — versão 3</h1>
 <p>Versão em execução: <b>${escape(version ?? "não informada")}</b></p>
 <p>Você entrou como <b>${escape(ctx.name ?? ctx.email)}</b> (${escape(ctx.role?.name ?? "")}).</p>
 <p><a href="/_gateway/login?saiu=1" onclick="fetch('/_gateway/logout',{method:'POST'});return true">Sair do projeto</a></p>
