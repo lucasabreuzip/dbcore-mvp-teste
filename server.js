@@ -26,11 +26,14 @@ const fileCommit = (() => {
 })();
 const commit = env("APP_COMMIT", "") || fileCommit || null;
 const repository = env("APP_REPOSITORY", "") || null;
+// Canal do GitFlow (develop, release-candidate, release, hotfix-candidate, hotfix): selo no hub.
+const channel = env("APP_CHANNEL", "") || null;
 
 const manifest = {
   version,
   commit,
   repository,
+  channel,
   permissions: [{ code: "teste.ver", name: "Ver a página de teste" }],
   roles: [{ code: "leitor", name: "Leitor", permissions: ["teste.ver"] }]
 };
@@ -81,7 +84,7 @@ const server = https.createServer(
         200,
         `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>MVP de teste</title>
 <body style="font-family:system-ui;margin:3rem;color:#0b1a17">
-<h1>MVP de teste (GitHub) — 1.1.1 (hotfix)</h1>
+<h1>MVP de teste (GitHub) — 1.1.2 (hotfix)</h1>
 <p>Versão em execução: <b>${escape(version ?? "não informada")}</b></p>
 <p>Você entrou como <b>${escape(ctx.name ?? ctx.email)}</b> (${escape(ctx.role?.name ?? "")}).</p>
 <p style="color:#5d6f69">Rodapé da feature.</p>
