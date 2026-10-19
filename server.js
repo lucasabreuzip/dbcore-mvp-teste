@@ -81,7 +81,7 @@ const server = https.createServer(
         200,
         `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>MVP de teste</title>
 <body style="font-family:system-ui;margin:3rem;color:#0b1a17">
-<h1>MVP de teste (GitHub) — filtros</h1>
+<h1>MVP de teste (GitHub) — 1.1.0</h1>
 <p>Versão em execução: <b>${escape(version ?? "não informada")}</b></p>
 <p>Você entrou como <b>${escape(ctx.name ?? ctx.email)}</b> (${escape(ctx.role?.name ?? "")}).</p>
 <p style="color:#5d6f69">Rodapé da feature.</p>
