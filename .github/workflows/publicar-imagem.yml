@@ -3,12 +3,15 @@
 #
 #   feature/*                     só build de teste (PR), não publica
 #   develop                       ghcr.io/<conta>/<repo>:develop-<commit>  + :develop (móvel)   → homologação
-#   release/X.Y.Z, hotfix/X.Y.Z   ghcr.io/<conta>/<repo>:X.Y.Z-rc.<n>                          → homologação
+#   release/X.Y.Z                 ghcr.io/<conta>/<repo>:X.Y.Z-rc.<n>                          → homologação
+#   hotfix/X.Y.Z                  ghcr.io/<conta>/<repo>:X.Y.Z-hotfix.<n>                      → homologação
 #   tag vX.Y ou vX.Y.Z (main)     ghcr.io/<conta>/<repo>:X.Y(.Z)                               → produção
+#                                 (canal "hotfix" se a tag é o merge de um hotfix, senão "release")
 #
 # No Dokploy: produção com MVP_IMAGE=ghcr.io/<conta>/<repo>:X.Y.Z (sempre fixa); homologação pode usar :develop.
-# Versão, commit e repositório vão gravados na imagem (APP_VERSION, APP_COMMIT, APP_REPOSITORY) para o manifesto: o hub
-# mostra cada versão com o link do commit e consegue voltar para uma anterior trocando só o MVP_IMAGE.
+# Versão, canal do GitFlow, commit e repositório vão gravados na imagem (APP_VERSION, APP_CHANNEL, APP_COMMIT,
+# APP_REPOSITORY) para o manifesto: o hub mostra cada versão com o tipo (develop, candidata, release, hotfix) e o link
+# do commit, e consegue voltar para uma anterior trocando só o MVP_IMAGE.
 name: Publicar imagem
 
 on:
@@ -34,20 +37,26 @@ jobs:
           repo="ghcr.io/${GITHUB_REPOSITORY,,}"
           sha="${GITHUB_SHA::7}"; ref="$GITHUB_REF"; nome="${GITHUB_REF#refs/heads/}"
           semver='^[0-9]+\.[0-9]+(\.[0-9]+)?$'
-          publicar=nao; versao="pr-$sha"; movel=""
+          publicar=nao; versao="pr-$sha"; movel=""; canal=""
           if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
             if [[ "$ref" == refs/tags/v* && "${ref#refs/tags/v}" =~ $semver ]]; then
-              publicar=sim; versao="${ref#refs/tags/v}"
+              publicar=sim; versao="${ref#refs/tags/v}"; canal=release
+              # Tag criada no merge de um hotfix ("Merge hotfix/…", "Merge branch 'hotfix/…'", PR "…/hotfix/…").
+              if git log -1 --pretty=%s | grep -Eq "(^|[ '/])hotfix/"; then canal=hotfix; fi
             elif [[ "$nome" == release/* || "$nome" == hotfix/* ]]; then
-              if [[ "${nome#*/}" =~ $semver ]]; then publicar=sim; versao="${nome#*/}-rc.$GITHUB_RUN_NUMBER"
+              if [[ "${nome#*/}" =~ $semver ]]; then
+                publicar=sim
+                if [[ "$nome" == hotfix/* ]]; then versao="${nome#*/}-hotfix.$GITHUB_RUN_NUMBER"; canal=hotfix-candidate
+                else versao="${nome#*/}-rc.$GITHUB_RUN_NUMBER"; canal=release-candidate; fi
               else echo "::warning::use release/X.Y.Z ou hotfix/X.Y.Z (recebido: $nome) — imagem não publicada"; fi
             elif [[ "$nome" == develop ]]; then
-              publicar=sim; versao="develop-$sha"; movel="develop"
+              publicar=sim; versao="develop-$sha"; movel="develop"; canal=develop
             fi
           fi
           tags="$repo:$versao"; [[ -n "$movel" ]] && tags="$tags,$repo:$movel"
           echo "publicar=$publicar" >> "$GITHUB_OUTPUT"
           echo "version=$versao" >> "$GITHUB_OUTPUT"
+          echo "channel=$canal" >> "$GITHUB_OUTPUT"
           echo "image=$repo:$versao" >> "$GITHUB_OUTPUT"
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
 
@@ -65,6 +74,7 @@ jobs:
           tags: ${{ steps.v.outputs.tags }}
           build-args: |
             APP_VERSION=${{ steps.v.outputs.version }}
+            APP_CHANNEL=${{ steps.v.outputs.channel }}
             APP_COMMIT=${{ github.sha }}
             APP_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
           labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
